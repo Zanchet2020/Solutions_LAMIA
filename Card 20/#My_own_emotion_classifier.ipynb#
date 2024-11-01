@@ -1,0 +1,720 @@
+l{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {
+    "id": "AH7CI48W0z5W"
+   },
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import torch\n",
+    "import cv2\n",
+    "import math\n",
+    "import os\n",
+    "import matplotlib.pyplot as plt\n",
+    "import zipfile"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 35
+    },
+    "id": "8MvmnsDj4Gxb",
+    "outputId": "deb72051-fa66-4940-e1b6-7a4dcee808af"
+   },
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "2024-08-21 12:39:29.078930: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.\n",
+      "2024-08-21 12:39:29.088493: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:485] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\n",
+      "2024-08-21 12:39:29.099939: E external/local_xla/xla/stream_executor/cuda/cuda_dnn.cc:8454] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\n",
+      "2024-08-21 12:39:29.103377: E external/local_xla/xla/stream_executor/cuda/cuda_blas.cc:1452] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\n",
+      "2024-08-21 12:39:29.112202: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\n",
+      "To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n",
+      "2024-08-21 12:39:29.768227: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT\n"
+     ]
+    },
+    {
+     "data": {
+      "text/plain": [
+       "'2.17.0'"
+      ]
+     },
+     "execution_count": 2,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "import tensorflow\n",
+    "from tensorflow.keras.preprocessing.image import img_to_array\n",
+    "from tensorflow.keras.utils import image_dataset_from_directory\n",
+    "from tensorflow.keras.models import Model, Sequential\n",
+    "from tensorflow.keras.layers import Dense, Dropout, Flatten, Activation, Input\n",
+    "from tensorflow.keras.layers import Conv2D, BatchNormalization, MaxPooling2D\n",
+    "from tensorflow.keras.losses import categorical_crossentropy\n",
+    "from tensorflow.keras.optimizers import Adam\n",
+    "from tensorflow.keras.regularizers import l2\n",
+    "from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint\n",
+    "from tensorflow.keras.models import load_model\n",
+    "from tensorflow.keras.models import model_from_json\n",
+    "\n",
+    "tensorflow.__version__"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[name: \"/device:CPU:0\"\n",
+      "device_type: \"CPU\"\n",
+      "memory_limit: 268435456\n",
+      "locality {\n",
+      "}\n",
+      "incarnation: 6513230967697635134\n",
+      "xla_global_id: -1\n",
+      "]\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "WARNING: All log messages before absl::InitializeLog() is called are written to STDERR\n",
+      "I0000 00:00:1724254771.110062   27300 cuda_executor.cc:1015] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero. See more at https://github.com/torvalds/linux/blob/v6.0/Documentation/ABI/testing/sysfs-bus-pci#L344-L355\n",
+      "2024-08-21 12:39:31.111117: W tensorflow/core/common_runtime/gpu/gpu_device.cc:2343] Cannot dlopen some GPU libraries. Please make sure the missing libraries mentioned above are installed properly if you would like to use GPU. Follow the guide at https://www.tensorflow.org/install/gpu for how to download and setup the required libraries for your platform.\n",
+      "Skipping registering GPU devices...\n"
+     ]
+    }
+   ],
+   "source": [
+    "from tensorflow.python.client import device_lib\n",
+    "print(device_lib.list_local_devices())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {
+    "id": "gRbqNQA0pj3_"
+   },
+   "outputs": [],
+   "source": [
+    "batch_size = 64\n",
+    "image_size = 48"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "0XfBxdlq7u_7",
+    "outputId": "03fd8cd0-0fd3-4967-d1b4-5a54417ec583"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Found 28709 files belonging to 7 classes.\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "WARNING: All log messages before absl::InitializeLog() is called are written to STDERR\n",
+      "I0000 00:00:1724254564.115316   26445 cuda_executor.cc:1015] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero. See more at https://github.com/torvalds/linux/blob/v6.0/Documentation/ABI/testing/sysfs-bus-pci#L344-L355\n",
+      "2024-08-21 12:36:04.117842: W tensorflow/core/common_runtime/gpu/gpu_device.cc:2343] Cannot dlopen some GPU libraries. Please make sure the missing libraries mentioned above are installed properly if you would like to use GPU. Follow the guide at https://www.tensorflow.org/install/gpu for how to download and setup the required libraries for your platform.\n",
+      "Skipping registering GPU devices...\n"
+     ]
+    }
+   ],
+   "source": [
+    "training_data = image_dataset_from_directory(\"./fer2013/train\", batch_size = batch_size, label_mode = 'categorical', color_mode='grayscale', image_size=(image_size,image_size))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {
+    "id": "L8JIg_RBqgkj"
+   },
+   "outputs": [],
+   "source": [
+    "training_data = training_data.repeat()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "aXODh02M9PRj",
+    "outputId": "82ddc6d5-136a-48c0-e15b-172fc9d8c298"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Found 3589 files belonging to 7 classes.\n"
+     ]
+    }
+   ],
+   "source": [
+    "validation_data = image_dataset_from_directory(\"./fer2013/validation\", batch_size = batch_size, label_mode = 'categorical', color_mode='grayscale', image_size=(image_size,image_size))\n",
+    "validation_data = validation_data.repeat()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "metadata": {
+    "id": "a2HSNMiUGUEK"
+   },
+   "outputs": [],
+   "source": [
+    "emotions = [\"Angry\", \"Disgusted\", \"Afraid\", \"Happy\", \"Neutral\", \"Sad\", \"Surprised\"]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "metadata": {
+    "id": "3t1-0jcYG6oc"
+   },
+   "outputs": [],
+   "source": [
+    "training_data_normalized = training_data.map(lambda x, y: (x/255, y))\n",
+    "validation_data_normalized = validation_data.map(lambda x, y: (x/255, y))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 20,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 446
+    },
+    "id": "e6MisZF9ETG_",
+    "outputId": "ef1525db-8c51-4d2e-e6ea-d7b2ae455d2d"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "(64, 48, 48, 1)\n"
+     ]
+    },
+    {
+     "data": {
+      "image/png": "iVBORw0KGgoAAAANSUhEUgAAAYUAAAGbCAYAAAAr/4yjAAAAOXRFWHRTb2Z0d2FyZQBNYXRwbG90bGliIHZlcnNpb24zLjkuMiwgaHR0cHM6Ly9tYXRwbG90bGliLm9yZy8hTgPZAAAACXBIWXMAAA9hAAAPYQGoP6dpAAAvzklEQVR4nO3da7Cld1Xn8fVc9vXcz+krTdKhk0AIE8aYDFCEVAKSCShoW1rU6IihtHxBWRRjlTpQjgTKWylQWKLltQxBx7JqqJgS5eZAqMGaTAKCqQmmSRPSCd3p27nus8++Pvt55oXyn8Tw/61Nnw4t+v1U+cJe/X/2c92rN1lrPUlVVZUBAGBm6aXeAQDAvxwkBQBAQFIAAAQkBQBAQFIAAAQkBQBAQFIAAAQkBQBAQFIAAAQkBXzHOHHihCVJYu973/su2jY/+9nPWpIk9tnPfvaibfO58I1j/9CHPnSpdwX/ypEU8Jz60Ic+ZEmS2Be+8IVLvSvPmY9+9KN2yy232L59+6zdbtuRI0fsTW96k33iE5+41LsGfMtICsAuvO9977Pv//7vtyRJ7J3vfKd94AMfsB/6oR+y48eP25//+Z9f6t0DvmX5pd4B4DtVURT2S7/0S3bbbbfZpz71qWfFz507d0n2C9gNfingkhuNRvaud73LbrjhBltYWLCZmRm7+eab7b777ouu+cAHPmCHDx+2Vqtlt9xyiz388MPP+jvHjh2zH/7hH7bl5WVrNpt244032l/+5V+6+9Pr9ezYsWO2uroq/97q6qp1Oh276aabvml83759F3SMm5ub9pa3vMUWFhZscXHR7rjjDtvc3HT3G7gYSAq45Dqdjv3RH/2R3Xrrrfbrv/7r9u53v9vOnz9vt99+u/393//9s/7+hz/8Yfut3/ot++mf/ml75zvfaQ8//LC95jWvsbNnz4a/8+Uvf9le8YpX2COPPGLveMc77P3vf7/NzMzY0aNH7S/+4i/k/jz44IP24he/2H77t39b/r19+/ZZq9Wyj370o7a+vn5RjrGqKvuBH/gB+5M/+RP7sR/7MfvlX/5lO3nypN1xxx1y+8BFUwHPobvuuqsys+rzn/989O8URVENh8Nn/NnGxka1f//+6id+4ifCnz3++OOVmVWtVqs6efJk+PMHHnigMrPqZ37mZ8Kffc/3fE913XXXVYPBIPxZWZbVK1/5yurqq68Of3bfffdVZlbdd999z/qzO++80z2+d73rXZWZVTMzM9XrX//66ld+5Veqv/u7v7vgY7z33nsrM6t+4zd+4xlrb7755srMqrvuusvdJ2A3+KWASy7LMqvX62ZmVpalra+vW1EUduONN9oXv/jFZ/39o0eP2qFDh8L//7KXvcxe/vKX28c+9jEzM1tfX7fPfOYz9qY3vcm2t7dtdXXVVldXbW1tzW6//XY7fvy4nTp1Kro/t956q1VVZe9+97vdfX/Pe95jf/Znf2bXX3+9ffKTn7Rf+IVfsBtuuMG++7u/2x555JFv+Rg/9rGPWZ7n9ta3vvUZa9/2trdNcSaB3SMp4F+Eu+++21760pdas9m0lZUV27t3r/31X/+1bW1tPevvXn311c/6sxe+8IV24sQJMzP76le/alVV2S/+4i/a3r17n/F/d955p9lF/o/AP/IjP2Kf+9znbGNjwz71qU/Zj/7oj9qXvvQle+Mb32iDweBbOsYnnnjCDh48aLOzs8/4jBe96EUXbX8BheojXHJ/+qd/am95y1vs6NGj9nM/93O2b98+y7LMfu3Xfs0ee+yxb3l7ZVmamdnP/uzP2u233/5N/85VV1216/3+5+bn5+22226z2267zWq1mt199932wAMP2C233HLRjxF4rpAUcMl95CMfsSNHjtg999xjSZKEP//Gv+r/uePHjz/rzx599FG74oorzMzsyJEjZmZWq9Xsta997XO238qNN95od999t50+fdrsWzjGw4cP26c//WnrdrvP+LXwla985du49/i3jP/5CJdclmVm/1R58w0PPPCA3X///d/07997773P+G8CDz74oD3wwAP2+te/3uyfqoJuvfVW+/3f//3wpfx058+fl/szbUlqr9eL7uPHP/5xs6f9zz7THuP3fu/3WlEU9ru/+7vhzyaTiX3wgx+U+wJcLPxSwLfFH//xH3/TsQ9vf/vb7Q1veIPdc8899oM/+IP2fd/3ffb444/b7/3e79m1115r3W73WWuuuuoqe9WrXmVvfetbbTgc2m/+5m/aysqK/fzP/3z4O7/zO79jr3rVq+y6666zn/qpn7IjR47Y2bNn7f7777eTJ0/aQw89FN3XBx980F796lfbnXfeKf9jc6/Xs1e+8pX2ile8wl73utfZZZddZpubm3bvvffa5z73OTt69Khdf/31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",
+      "text/plain": [
+       "<Figure size 640x480 with 1 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "2024-08-21 12:33:54.430763: I tensorflow/core/framework/local_rendezvous.cc:404] Local rendezvous is aborting with status: OUT_OF_RANGE: End of sequence\n"
+     ]
+    }
+   ],
+   "source": [
+    "sample = training_data_normalized.take(1)\n",
+    "for image_batch, labels_batch in sample:\n",
+    "    print(image_batch.shape)\n",
+    "    first_image = image_batch[0]\n",
+    "    first_label = labels_batch[0]\n",
+    "    plt.imshow((first_image.numpy() * 255).astype('uint8'))\n",
+    "    plt.title(f\"Label: {emotions[np.argmax(first_label)]}\")\n",
+    "    plt.axis(\"off\")\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 1000
+    },
+    "id": "8iKENIPYKabL",
+    "outputId": "4f9da33e-ee1b-4040-8720-e8e27c86dc0e"
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"><span style=\"font-weight: bold\">Model: \"Emotion_recon_3000\"</span>\n",
+       "</pre>\n"
+      ],
+      "text/plain": [
+       "\u001b[1mModel: \"Emotion_recon_3000\"\u001b[0m\n"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "text/html": [
+       "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\">┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓\n",
+       "┃<span style=\"font-weight: bold\"> Layer (type)                    </span>┃<span style=\"font-weight: bold\"> Output Shape           </span>┃<span style=\"font-weight: bold\">       Param # </span>┃\n",
+       "┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩\n",
+       "│ input_layer (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">InputLayer</span>)        │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1</span>)      │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)                 │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">256</span>)    │         <span style=\"color: #00af00; text-decoration-color: #00af00\">2,560</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_1 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">256</span>)    │       <span style=\"color: #00af00; text-decoration-color: #00af00\">590,080</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">48</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">256</span>)    │         <span style=\"color: #00af00; text-decoration-color: #00af00\">1,024</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">MaxPooling2D</span>)    │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">256</span>)    │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">256</span>)    │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_2 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)    │     <span style=\"color: #00af00; text-decoration-color: #00af00\">1,180,160</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_1           │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)    │         <span style=\"color: #00af00; text-decoration-color: #00af00\">2,048</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_3 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)    │     <span style=\"color: #00af00; text-decoration-color: #00af00\">2,359,808</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_2           │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">24</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)    │         <span style=\"color: #00af00; text-decoration-color: #00af00\">2,048</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d_1 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">MaxPooling2D</span>)  │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)    │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_1 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)    │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_4 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)   │     <span style=\"color: #00af00; text-decoration-color: #00af00\">4,719,616</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_3           │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)   │         <span style=\"color: #00af00; text-decoration-color: #00af00\">4,096</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_5 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)   │     <span style=\"color: #00af00; text-decoration-color: #00af00\">9,438,208</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_4           │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">12</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)   │         <span style=\"color: #00af00; text-decoration-color: #00af00\">4,096</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d_2 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">MaxPooling2D</span>)  │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)     │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_2 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)     │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_6 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)     │    <span style=\"color: #00af00; text-decoration-color: #00af00\">18,876,416</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_5           │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)     │         <span style=\"color: #00af00; text-decoration-color: #00af00\">8,192</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_7 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Conv2D</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)     │    <span style=\"color: #00af00; text-decoration-color: #00af00\">37,750,784</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_6           │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">6</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)     │         <span style=\"color: #00af00; text-decoration-color: #00af00\">8,192</span> │\n",
+       "│ (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">BatchNormalization</span>)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d_3 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">MaxPooling2D</span>)  │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">3</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">3</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)     │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_3 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">3</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">3</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)     │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ flatten (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Flatten</span>)               │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">18432</span>)          │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dense</span>)                   │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)           │    <span style=\"color: #00af00; text-decoration-color: #00af00\">37,750,784</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_4 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">2048</span>)           │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense_1 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dense</span>)                 │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)           │     <span style=\"color: #00af00; text-decoration-color: #00af00\">2,098,176</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_5 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">1024</span>)           │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense_2 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dense</span>)                 │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)            │       <span style=\"color: #00af00; text-decoration-color: #00af00\">524,800</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_6 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dropout</span>)             │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">512</span>)            │             <span style=\"color: #00af00; text-decoration-color: #00af00\">0</span> │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense_3 (<span style=\"color: #0087ff; text-decoration-color: #0087ff\">Dense</span>)                 │ (<span style=\"color: #00d7ff; text-decoration-color: #00d7ff\">None</span>, <span style=\"color: #00af00; text-decoration-color: #00af00\">7</span>)              │         <span style=\"color: #00af00; text-decoration-color: #00af00\">3,591</span> │\n",
+       "└─────────────────────────────────┴────────────────────────┴───────────────┘\n",
+       "</pre>\n"
+      ],
+      "text/plain": [
+       "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓\n",
+       "┃\u001b[1m \u001b[0m\u001b[1mLayer (type)                   \u001b[0m\u001b[1m \u001b[0m┃\u001b[1m \u001b[0m\u001b[1mOutput Shape          \u001b[0m\u001b[1m \u001b[0m┃\u001b[1m \u001b[0m\u001b[1m      Param #\u001b[0m\u001b[1m \u001b[0m┃\n",
+       "┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩\n",
+       "│ input_layer (\u001b[38;5;33mInputLayer\u001b[0m)        │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m1\u001b[0m)      │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d (\u001b[38;5;33mConv2D\u001b[0m)                 │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m256\u001b[0m)    │         \u001b[38;5;34m2,560\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_1 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m256\u001b[0m)    │       \u001b[38;5;34m590,080\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m48\u001b[0m, \u001b[38;5;34m256\u001b[0m)    │         \u001b[38;5;34m1,024\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d (\u001b[38;5;33mMaxPooling2D\u001b[0m)    │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m256\u001b[0m)    │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout (\u001b[38;5;33mDropout\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m256\u001b[0m)    │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_2 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m512\u001b[0m)    │     \u001b[38;5;34m1,180,160\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_1           │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m512\u001b[0m)    │         \u001b[38;5;34m2,048\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_3 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m512\u001b[0m)    │     \u001b[38;5;34m2,359,808\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_2           │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m24\u001b[0m, \u001b[38;5;34m512\u001b[0m)    │         \u001b[38;5;34m2,048\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d_1 (\u001b[38;5;33mMaxPooling2D\u001b[0m)  │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m512\u001b[0m)    │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_1 (\u001b[38;5;33mDropout\u001b[0m)             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m512\u001b[0m)    │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_4 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m1024\u001b[0m)   │     \u001b[38;5;34m4,719,616\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_3           │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m1024\u001b[0m)   │         \u001b[38;5;34m4,096\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_5 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m1024\u001b[0m)   │     \u001b[38;5;34m9,438,208\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_4           │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m12\u001b[0m, \u001b[38;5;34m1024\u001b[0m)   │         \u001b[38;5;34m4,096\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d_2 (\u001b[38;5;33mMaxPooling2D\u001b[0m)  │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m1024\u001b[0m)     │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_2 (\u001b[38;5;33mDropout\u001b[0m)             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m1024\u001b[0m)     │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_6 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m2048\u001b[0m)     │    \u001b[38;5;34m18,876,416\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_5           │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m2048\u001b[0m)     │         \u001b[38;5;34m8,192\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ conv2d_7 (\u001b[38;5;33mConv2D\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m2048\u001b[0m)     │    \u001b[38;5;34m37,750,784\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ batch_normalization_6           │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m6\u001b[0m, \u001b[38;5;34m2048\u001b[0m)     │         \u001b[38;5;34m8,192\u001b[0m │\n",
+       "│ (\u001b[38;5;33mBatchNormalization\u001b[0m)            │                        │               │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ max_pooling2d_3 (\u001b[38;5;33mMaxPooling2D\u001b[0m)  │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m3\u001b[0m, \u001b[38;5;34m3\u001b[0m, \u001b[38;5;34m2048\u001b[0m)     │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_3 (\u001b[38;5;33mDropout\u001b[0m)             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m3\u001b[0m, \u001b[38;5;34m3\u001b[0m, \u001b[38;5;34m2048\u001b[0m)     │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ flatten (\u001b[38;5;33mFlatten\u001b[0m)               │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m18432\u001b[0m)          │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense (\u001b[38;5;33mDense\u001b[0m)                   │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m2048\u001b[0m)           │    \u001b[38;5;34m37,750,784\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_4 (\u001b[38;5;33mDropout\u001b[0m)             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m2048\u001b[0m)           │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense_1 (\u001b[38;5;33mDense\u001b[0m)                 │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m1024\u001b[0m)           │     \u001b[38;5;34m2,098,176\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_5 (\u001b[38;5;33mDropout\u001b[0m)             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m1024\u001b[0m)           │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense_2 (\u001b[38;5;33mDense\u001b[0m)                 │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m512\u001b[0m)            │       \u001b[38;5;34m524,800\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dropout_6 (\u001b[38;5;33mDropout\u001b[0m)             │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m512\u001b[0m)            │             \u001b[38;5;34m0\u001b[0m │\n",
+       "├─────────────────────────────────┼────────────────────────┼───────────────┤\n",
+       "│ dense_3 (\u001b[38;5;33mDense\u001b[0m)                 │ (\u001b[38;5;45mNone\u001b[0m, \u001b[38;5;34m7\u001b[0m)              │         \u001b[38;5;34m3,591\u001b[0m │\n",
+       "└─────────────────────────────────┴────────────────────────┴───────────────┘\n"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "text/html": [
+       "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"><span style=\"font-weight: bold\"> Total params: </span><span style=\"color: #00af00; text-decoration-color: #00af00\">115,324,679</span> (439.93 MB)\n",
+       "</pre>\n"
+      ],
+      "text/plain": [
+       "\u001b[1m Total params: \u001b[0m\u001b[38;5;34m115,324,679\u001b[0m (439.93 MB)\n"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "text/html": [
+       "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"><span style=\"font-weight: bold\"> Trainable params: </span><span style=\"color: #00af00; text-decoration-color: #00af00\">115,309,831</span> (439.87 MB)\n",
+       "</pre>\n"
+      ],
+      "text/plain": [
+       "\u001b[1m Trainable params: \u001b[0m\u001b[38;5;34m115,309,831\u001b[0m (439.87 MB)\n"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "text/html": [
+       "<pre style=\"white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace\"><span style=\"font-weight: bold\"> Non-trainable params: </span><span style=\"color: #00af00; text-decoration-color: #00af00\">14,848</span> (58.00 KB)\n",
+       "</pre>\n"
+      ],
+      "text/plain": [
+       "\u001b[1m Non-trainable params: \u001b[0m\u001b[38;5;34m14,848\u001b[0m (58.00 KB)\n"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "num_features = 256\n",
+    "num_labels = 7 #len(emotions)\n",
+    "epochs = 100\n",
+    "width, height = image_size, image_size\n",
+    "\n",
+    "i = Input(shape=(width, height, 1))\n",
+    "x = Conv2D(num_features, kernel_size = (3,3), activation=\"relu\", padding = 'same', kernel_regularizer = l2(0.01))(i)\n",
+    "x = Conv2D(num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = MaxPooling2D(pool_size=(2,2), strides=(2,2))(x)\n",
+    "x = Dropout(0.3)(x)\n",
+    "\n",
+    "x = Conv2D(2*num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = Conv2D(2*num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = MaxPooling2D(pool_size=(2,2), strides=(2,2))(x)\n",
+    "x = Dropout(0.3)(x)\n",
+    "\n",
+    "x = Conv2D(2*2*num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = Conv2D(2*2*num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = MaxPooling2D(pool_size=(2,2), strides=(2,2))(x)\n",
+    "x = Dropout(0.3)(x)\n",
+    "\n",
+    "x = Conv2D(2*2*2*num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = Conv2D(2*2*2*num_features, kernel_size = (3,3), activation=\"relu\", padding=\"same\")(x)\n",
+    "x = BatchNormalization()(x)\n",
+    "x = MaxPooling2D(pool_size=(2,2), strides=(2,2))(x)\n",
+    "x = Dropout(0.3)(x)\n",
+    "\n",
+    "x = Flatten()(x)\n",
+    "\n",
+    "x = Dense(2*2*2*num_features, activation='relu')(x)\n",
+    "x = Dropout(0.4)(x)\n",
+    "x = Dense(2*2*num_features, activation='relu')(x)\n",
+    "x = Dropout(0.4)(x)\n",
+    "x = Dense(2*num_features, activation='relu')(x)\n",
+    "x = Dropout(0.5)(x)\n",
+    "\n",
+    "o = Dense(num_labels, activation='softmax')(x)\n",
+    "\n",
+    "model = Model(inputs = i, outputs = o, name='Emotion_recon_3000')\n",
+    "\n",
+    "model.summary()\n",
+    "\n",
+    "#model.compile(optimizer = Adam(weight_decay=None, learning_rate=0.9), loss = 'categorical_crossentropy', metrics = ['accuracy'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "jklErRzGqBh0"
+   },
+   "outputs": [],
+   "source": [
+    "num_features = 64\n",
+    "num_labels = 7\n",
+    "epochs = 100\n",
+    "width, height = image_size, image_size\n",
+    "\n",
+    "model = Sequential()\n",
+    "\n",
+    "model.add(Conv2D(num_features, kernel_size=(3,3), activation='relu',\n",
+    "                 input_shape=(width, height, 1), data_format = 'channels_last',\n",
+    "                 kernel_regularizer = l2(0.01)))\n",
+    "model.add(Conv2D(num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2)))\n",
+    "model.add(Dropout(0.5))\n",
+    "\n",
+    "model.add(Conv2D(2*num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(Conv2D(2*num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2)))\n",
+    "model.add(Dropout(0.5))\n",
+    "\n",
+    "model.add(Conv2D(2*2*num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(Conv2D(2*2*num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2)))\n",
+    "model.add(Dropout(0.5))\n",
+    "\n",
+    "model.add(Conv2D(2*2*2*num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(Conv2D(2*2*2*num_features, kernel_size=(3,3), activation='relu', padding='same'))\n",
+    "model.add(BatchNormalization())\n",
+    "model.add(MaxPooling2D(pool_size=(2,2), strides=(2,2)))\n",
+    "model.add(Dropout(0.5))\n",
+    "\n",
+    "model.add(Flatten())\n",
+    "\n",
+    "model.add(Dense(2*2*2*num_features, activation='relu'))\n",
+    "model.add(Dropout(0.4))\n",
+    "model.add(Dense(2*2*num_features, activation='relu'))\n",
+    "model.add(Dropout(0.4))\n",
+    "model.add(Dense(2*num_features, activation='relu'))\n",
+    "model.add(Dropout(0.5))\n",
+    "\n",
+    "model.add(Dense(num_labels, activation = 'softmax'))\n",
+    "\n",
+    "model.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "id": "2VOTjT1d6HBG"
+   },
+   "outputs": [],
+   "source": [
+    "model_file = 'expression_recognition_01.keras'\n",
+    "model_file_json = 'expression_recognition_01.json'\n",
+    "\n",
+    "lr_reducer = ReduceLROnPlateau(factor = 0.9, patience = 6, mode = 'auto', verbose = 1, min_lr=0.0000000001)\n",
+    "early_stopper = EarlyStopping(patience=15)\n",
+    "checkpointer = ModelCheckpoint(model_file, verbose = 1, save_best_only = True)\n",
+    "\n",
+    "model_json = model.to_json()\n",
+    "with open(model_file_json, 'w') as json_file:\n",
+    "    json_file.write(model_json)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "metadata": {
+    "id": "wCI2uaNDqcDM"
+   },
+   "outputs": [],
+   "source": [
+    "model.compile(loss = 'categorical_crossentropy',\n",
+    "              optimizer = Adam(learning_rate = 0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-7),\n",
+    "              metrics = ['accuracy'])\n",
+    "\n",
+    "arquivo_modelo = 'modelo_01_expressoes.keras'\n",
+    "arquivo_modelo_json = 'modelo_01_expressoes.json'\n",
+    "\n",
+    "lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor = 0.8, patience=3, verbose = 1)\n",
+    "early_stopper = EarlyStopping(monitor='val_loss', min_delta=0, patience = 8, verbose = 1, mode = 'auto')\n",
+    "checkpointer = ModelCheckpoint(arquivo_modelo, monitor='val_loss', verbose = 1, save_best_only=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/"
+    },
+    "id": "vT9fI-Ec8D10",
+    "outputId": "e5380cf7-d806-4ad2-b72c-da657a15b73b"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Epoch 1/100\n",
+      "\u001b[1m  2/300\u001b[0m \u001b[37m━━━━━━━━━━━━━━━━━━━━\u001b[0m \u001b[1m34:04\u001b[0m 7s/step - accuracy: 0.1758 - loss: 13.2949"
+     ]
+    }
+   ],
+   "source": [
+    "history = model.fit(training_data_normalized,\n",
+    "                    epochs = epochs,\n",
+    "                    steps_per_epoch = 30000 // 100,\n",
+    "                    shuffle=True,\n",
+    "                    validation_data = validation_data_normalized,\n",
+    "                    callbacks = [lr_reducer, checkpointer],\n",
+    "                    validation_steps = 10000 // 1000)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "colab": {
+     "base_uri": "https://localhost:8080/",
+     "height": 147
+    },
+    "id": "bAWB9BB2_gvO",
+    "outputId": "0b48acf4-4812-4301-fa5f-101f79b0ec96"
+   },
+   "outputs": [
+    {
+     "ename": "NameError",
+     "evalue": "name 'history' is not defined",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+      "\u001b[0;31mNameError\u001b[0m                                 Traceback (most recent call last)",
+      "\u001b[0;32m<ipython-input-5-6cd13d6a221b>\u001b[0m in \u001b[0;36m<cell line: 1>\u001b[0;34m()\u001b[0m\n\u001b[0;32m----> 1\u001b[0;31m \u001b[0mhistory\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mhistory\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m",
+      "\u001b[0;31mNameError\u001b[0m: name 'history' is not defined"
+     ]
+    }
+   ],
+   "source": [
+    "history"
+   ]
+  }
+ ],
+ "metadata": {
+  "accelerator": "GPU",
+  "colab": {
+   "gpuType": "T4",
+   "provenance": []
+  },
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.12.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}

@@ -1,0 +1,9 @@
+LAMIA_venv/
+.ipynb_checkpoints
+*.zip
+Material/
+fer2013/
+*.mp4
+*.jpg
+*.json
+*.h5
