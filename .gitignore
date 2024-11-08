@@ -7,3 +7,5 @@ fer2013/
 *.jpg
 *.json
 *.h5
+*.png
+.backups/
