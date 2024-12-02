@@ -10,3 +10,4 @@ fer2013/
 *.png
 .backups/
 freecodecamp_spacy/
+.venv/

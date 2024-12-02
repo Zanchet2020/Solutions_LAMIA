@@ -35,8 +35,6 @@ deepdiff
 defusedxml
 dill
 distlib
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl#sha256
-en-core-web-trf @ https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.7.3/en_core_web_trf-3.7.3-py3-none-any.whl#sha256
 executing
 fastcore
 fastjsonschema
@@ -149,7 +147,6 @@ prometheus_client
 prompt_toolkit
 protobuf
 psutil
-pt-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/pt_core_news_sm-3.7.0/pt_core_news_sm-3.7.0-py3-none-any.whl#sha256
 ptyprocess
 pure_eval
 pycparser
@@ -185,13 +182,6 @@ six
 smart-open
 sniffio
 soupsieve
-spacy
-spacy-alignments
-spacy-curated-transformers
-spacy-legacy
-spacy-loggers
-spacy-lookups-data
-spacy-transformers
 srsly
 stack-data
 sympy
